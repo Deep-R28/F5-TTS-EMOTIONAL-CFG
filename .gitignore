@@ -26,6 +26,8 @@ data/
 # Models
 ckpts/*
 !ckpts/vocab.txt
+!ckpts/indian_tts/
+!ckpts/indian_tts/model_last.pt.part_*
 
 *.pt
 *.pth
