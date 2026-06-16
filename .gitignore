@@ -24,7 +24,9 @@ data/
 *.zip
 
 # Models
-ckpts/
+ckpts/*
+!ckpts/vocab.txt
+
 *.pt
 *.pth
 *.ckpt
