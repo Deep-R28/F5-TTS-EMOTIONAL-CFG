@@ -14,6 +14,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from f5_tts.api import F5TTS
+from text_preprocessor  import preprocess_text
+from audio_postprocessor import postprocess
 
 from emotion_detector import detect_emotion
 
@@ -70,38 +72,43 @@ def split_phrases(text: str) -> list[str]:
     return [p.strip() for p in phrases if p.strip()]
 
 
+
 def generate_chunks(request: TTSRequest):
     voice   = VOICE_MAP[request.voice]
     phrases = split_phrases(request.text)
 
     for phrase in phrases:
-        # Detect or use provided emotion
-        emotion = detect_emotion(phrase) if request.emotion == "auto" \
-                  else request.emotion
+        # Layer 1 — text preprocessing
+        emotion      = detect_emotion(phrase) if request.emotion == "auto" \
+                       else request.emotion
+        prefix       = EMOTION_PREFIX.get(emotion, "")
+        clean_phrase = preprocess_text(prefix + phrase)
 
-        # Prefix the phrase with emotion cue for natural prosody
-        prefix      = EMOTION_PREFIX.get(emotion, "")
-        gen_text    = prefix + phrase
+        print(f"  [{emotion}] {clean_phrase}")
 
-        print(f"  [{emotion}] {gen_text}")
-
-        # Infer audio
+        # Layer 2 — inference with quality hyperparameters
         wav, sr, _ = f5tts.infer(
-            ref_file  = voice["ref_audio"],
-            ref_text  = voice["ref_text"],
-            gen_text  = gen_text,
-            seed      = -1,
+            ref_file           = voice["ref_audio"],
+            ref_text           = voice["ref_text"],
+            gen_text           = clean_phrase,
+            seed               = -1,
+            nfe_step           = 32,
+            cfg_strength       = 2.0,
+            sway_sampling_coef = -1.0,
+            speed              = 0.95,
         )
 
-        # Tensor → numpy → int16 PCM bytes
         if hasattr(wav, "numpy"):
             wav = wav.numpy()
 
+        # Layer 3 — audio post-processing
+        wav = postprocess(wav)
+
+        # Convert to int16 PCM bytes
         audio_int16 = (np.clip(wav, -1.0, 1.0) * 32767).astype(np.int16)
         raw_bytes   = audio_int16.tobytes()
-
-        # 4-byte length header + raw PCM
         yield len(raw_bytes).to_bytes(4, byteorder="little") + raw_bytes
+
 
 
 @app.post("/tts-stream")
